@@ -1,0 +1,30 @@
+# --- secrets ---
+.env
+
+# --- generated data / runtime artifacts ---
+cache/
+output/
+saved_searches/
+
+# --- python ---
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# --- os ---
+.DS_Store
+
+# --- local-only interview prep (do not publish) ---
+/interview-notes.html
+
+# --- excluded from the public repository (local-only / out of scope) ---
+# 投資戦略カタログの原本(.docx)と、そこから生成する教科書 Markdown。
+/投資戦略カタログ_80手法.md.docx
+/手法教科書.md
+/手法教科書_20260529.md
+/scripts/
+# Streamlit 版 UI(82手法ビューア)。公開リポジトリは軽量 HTML UI に一本化。
+/web/app.py
+/web/run.sh
