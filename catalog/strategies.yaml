@@ -1,0 +1,845 @@
+# 82-strategy investment catalog → rule engine spec
+# Source: /Users/bollet/Downloads/投資戦略カタログ_80手法.md.docx
+#
+# Schema:
+#   id: 1-82
+#   name: 手法名
+#   category: A-H
+#   data: required data sources
+#   light_compatible: bool — Light プランで判定可能か
+#   implemented: bool — expr/strength を持つか
+#   expr: 真偽値式。コンテキスト: `f` (StockFeatures), `_ramp(v,lo,hi)`, abs/min/max/sum
+#   strength: 0-100 式 (任意)。マッチ時のみ評価。省略時はマッチで100
+#   reason: 説明テンプレ。`.format(f=feat)` で展開 (算術は不可、属性アクセスのみ)
+#   weight: composite_score 乗数 (デフォルト 1.0)
+#
+# 単位: fraction (0.15 = 15%)。PER/PBR/PEG は unitless。
+
+strategies:
+  # ===== A. Fundamentals =====
+  - id: 1
+    name: バリュー投資
+    category: A
+    data: [statements, prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.per is not None and f.pbr is not None and 0 < f.per <= 12 and 0 < f.pbr <= 1.0"
+    strength: "(_ramp(f.per, 12, 5) + _ramp(f.pbr, 1.0, 0.5)) / 2"
+    reason: "PER={f.per:.1f}/PBR={f.pbr:.2f}"
+
+  - id: 2
+    name: グロース投資
+    category: A
+    data: [statements]
+    light_compatible: true
+    implemented: true
+    expr: "f.revenue_growth is not None and f.eps_growth is not None and max(f.revenue_growth, f.eps_growth) >= 0.20"
+    strength: "_ramp(max(f.revenue_growth, f.eps_growth) * 100, 20, 50)"
+    reason: "売上成長{f.revenue_growth:.1%}/EPS成長{f.eps_growth:.1%}"
+
+  - id: 3
+    name: GARP
+    category: A
+    data: [statements]
+    light_compatible: true
+    implemented: true
+    expr: "f.peg is not None and f.eps_growth is not None and 0 < f.peg <= 1.0 and f.eps_growth >= 0.10"
+    strength: "(_ramp(f.peg, 1.0, 0.3) + _ramp(f.eps_growth*100, 10, 30)) / 2"
+    reason: "PEG={f.peg:.2f}/EPS成長{f.eps_growth:.1%}"
+
+  - id: 4
+    name: クオリティ投資
+    category: A
+    data: [statements]
+    light_compatible: true
+    implemented: true
+    expr: "f.roe is not None and f.op_margin is not None and f.equity_ratio is not None and f.roe >= 0.15 and f.op_margin >= 0.15 and f.equity_ratio >= 0.50"
+    strength: "(_ramp(f.roe*100, 15, 30) + _ramp(f.op_margin*100, 15, 30) + _ramp(f.equity_ratio*100, 50, 80)) / 3"
+    reason: "ROE={f.roe:.1%}/営利率{f.op_margin:.1%}/自己資本{f.equity_ratio:.1%}"
+
+  - id: 5
+    name: ディープバリュー/ネットネット
+    category: A
+    data: [statements]
+    light_compatible: true
+    implemented: true
+    expr: "f.pbr is not None and 0 < f.pbr <= 0.5"
+    strength: "_ramp(f.pbr, 0.5, 0.2)"
+    reason: "PBR={f.pbr:.2f}<0.5"
+
+  - id: 6
+    name: 配当成長投資
+    category: A
+    data: [statements]
+    light_compatible: true
+    implemented: true
+    expr: "f.dividend_yield is not None and f.dividend_growth_3y is not None and f.dividend_yield > 0.02 and f.dividend_growth_3y > 0.05"
+    strength: "(_ramp(f.dividend_yield*100, 2, 5) + _ramp(f.dividend_growth_3y*100, 5, 15)) / 2"
+    reason: "配当利回り{f.dividend_yield:.1%}/3年CAGR{f.dividend_growth_3y:.1%}"
+
+  - id: 7
+    name: 高配当株投資
+    category: A
+    data: [statements, prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.dividend_yield is not None and f.dividend_yield >= 0.035"
+    strength: "_ramp(f.dividend_yield*100, 3.5, 6.0)"
+    reason: "配当利回り{f.dividend_yield:.1%}>=3.5%"
+
+  - id: 8
+    name: ターンアラウンド
+    category: A
+    data: [statements]
+    light_compatible: true
+    implemented: true
+    expr: "f.prev_net_income is not None and f.net_income is not None and f.prev_net_income < 0 and f.net_income > 0"
+    strength: "80.0"
+    reason: "前期赤字→当期黒字転換"
+
+  - id: 9
+    name: アセットプレイ
+    category: A
+    data: [statements, prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.bps is not None and f.close is not None and f.bps > f.close * 1.5"
+    strength: "_ramp(f.bps / f.close, 1.5, 3.0)"
+    reason: "BPS={f.bps:.0f}>株価×1.5"
+
+  - id: 10
+    name: キャタリスト投資
+    category: A
+    data: [news]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "個別ニュース・触媒情報フィードが必要(Light非対応)"
+
+  # ===== B. Technical / Price Action =====
+  - id: 11
+    name: トレンドフォロー(順張り)
+    category: B
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.close is not None and f.sma200 is not None and f.sma50 is not None and f.close > f.sma200 and f.sma50 > f.sma200"
+    strength: "(_ramp((f.close/f.sma200 - 1)*100, 0, 25) + _ramp((f.sma50/f.sma200 - 1)*100, 0, 10)) / 2"
+    reason: "終値>200MA かつ 50MA>200MA"
+
+  - id: 12
+    name: 逆張り(平均回帰)
+    category: B
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.rsi14 is not None and f.rsi14 <= 30"
+    strength: "_ramp(f.rsi14, 30, 15)"
+    reason: "RSI(14)={f.rsi14:.1f}<=30"
+
+  - id: 13
+    name: ブレイクアウト
+    category: B
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.pct_52w_high is not None and f.vol_ratio is not None and f.pct_52w_high >= 0.98 and f.vol_ratio >= 1.5"
+    strength: "(_ramp(f.pct_52w_high*100, 98, 100) + _ramp(f.vol_ratio, 1.5, 3.0)) / 2"
+    reason: "52週高値比{f.pct_52w_high:.1%}/出来高{f.vol_ratio:.2f}倍"
+
+  - id: 14
+    name: 押し目買い
+    category: B
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.close is not None and f.high60 is not None and f.sma50 is not None and f.close > f.sma50 and 0.05 < (f.high60-f.close)/f.high60 < 0.15"
+    strength: "_ramp((f.high60 - f.close) / f.high60 * 100, 5, 12)"
+    reason: "60日高値{f.high60:.0f}→終値{f.close:.0f}押し目・SMA50上"
+
+  - id: 15
+    name: モメンタム/相対強度
+    category: B
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.pct_52w_high is not None and f.sma200 is not None and f.close is not None and f.pct_52w_high >= 0.90 and f.close >= f.sma200 * 1.10"
+    strength: "(_ramp(f.pct_52w_high*100, 90, 100) + _ramp((f.close/f.sma200 - 1)*100, 10, 40)) / 2"
+    reason: "52週高値比{f.pct_52w_high:.1%}/SMA200上方乖離"
+
+  - id: 16
+    name: レンジ/ボックス
+    category: B
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.rsi14 is not None and f.close is not None and f.sma50 is not None and 40 <= f.rsi14 <= 60 and abs(f.close/f.sma50 - 1) <= 0.03"
+    strength: "(100 - abs(f.rsi14 - 50) * 4 + (3 - abs(f.close/f.sma50 - 1)*100) / 3 * 100) / 2"
+    reason: "RSI={f.rsi14:.0f}/SMA50近接"
+
+  - id: 17
+    name: チャートパターン(コイル)
+    category: B
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.vol_contraction is not None and f.vol_contraction < 0.5"
+    strength: "_ramp(f.vol_contraction, 0.5, 0.2)"
+    reason: "ボラ収縮(直近/長期={f.vol_contraction:.2f})"
+
+  - id: 18
+    name: 移動平均GC接近
+    category: B
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.sma50 is not None and f.sma200 is not None and 0 <= (f.sma50/f.sma200 - 1) * 100 <= 3"
+    strength: "_ramp(3 - (f.sma50/f.sma200 - 1)*100, 0, 3)"
+    reason: "50/200MA GC接近"
+
+  - id: 19
+    name: VWAP回帰
+    category: B
+    data: [intraday]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "日中VWAPデータ要(Light日足のみ)"
+
+  - id: 20
+    name: 出来高分析(急増)
+    category: B
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.vol_ratio is not None and f.vol_ratio >= 2.0"
+    strength: "_ramp(f.vol_ratio, 2.0, 5.0)"
+    reason: "出来高{f.vol_ratio:.2f}倍(2倍超)"
+
+  # ===== C. Event Driven =====
+  - id: 21
+    name: 決算プレイ
+    category: C
+    data: [statements]
+    light_compatible: true
+    implemented: true
+    expr: "f.days_since_statement is not None and f.days_since_statement <= 5"
+    strength: "_ramp(5 - f.days_since_statement, 0, 5)"
+    reason: "直近{f.days_since_statement}日以内に決算開示"
+
+  - id: 22
+    name: PEAD(決算後ドリフト)
+    category: C
+    data: [statements, prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.days_since_statement is not None and 1 <= f.days_since_statement <= 30 and f.post_earn_drift is not None and f.post_earn_drift > 0.05"
+    strength: "_ramp(f.post_earn_drift * 100, 5, 20)"
+    reason: "決算後{f.days_since_statement}日でドリフト+{f.post_earn_drift:.1%}"
+
+  - id: 23
+    name: IPOセカンダリー
+    category: C
+    data: [listed_info, prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.days_since_listing is not None and f.days_since_listing <= 90"
+    strength: "_ramp(90 - f.days_since_listing, 0, 90)"
+    reason: "上場後{f.days_since_listing}日以内"
+
+  - id: 24
+    name: M&A/TOB裁定
+    category: C
+    data: [news]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "TOB情報フィード要"
+
+  - id: 25
+    name: 公募増資・売出し
+    category: C
+    data: [news]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "増資発表フィード要"
+
+  - id: 26
+    name: 自社株買い追随
+    category: C
+    data: [news]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "自社株買い発表フィード要"
+
+  - id: 27
+    name: 株式分割
+    category: C
+    data: [news]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "分割発表フィード要"
+
+  - id: 28
+    name: スピンオフ/親子上場
+    category: C
+    data: [news]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "スピンオフイベント要"
+
+  - id: 29
+    name: 指数リバランス
+    category: C
+    data: [index_composition]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "指数構成銘柄データ要"
+
+  - id: 30
+    name: 不祥事/暴落リバウンド
+    category: C
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.return_1m is not None and f.return_5d is not None and f.return_1m < -0.20 and f.return_5d > 0.03"
+    strength: "(_ramp(-f.return_1m * 100, 20, 40) + _ramp(f.return_5d * 100, 3, 10)) / 2"
+    reason: "1ヶ月{f.return_1m:.1%}急落後5日リバウンド{f.return_5d:.1%}"
+
+  # ===== D. Anomalies =====
+  - id: 31
+    name: 月初・月末効果
+    category: D
+    data: [calendar]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "市場全体カレンダー効果"
+
+  - id: 32
+    name: 曜日アノマリー
+    category: D
+    data: [calendar]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "市場全体カレンダー効果"
+
+  - id: 33
+    name: ハロウィン効果
+    category: D
+    data: [calendar]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "市場全体カレンダー効果"
+
+  - id: 34
+    name: SQ前後アノマリー
+    category: D
+    data: [calendar]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "市場全体イベント"
+
+  - id: 35
+    name: 優待クロス
+    category: D
+    data: [margin]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "信用残・貸借データ要"
+
+  - id: 36
+    name: 配当落ち日トレード
+    category: D
+    data: [statements, calendar]
+    light_compatible: true
+    implemented: true
+    expr: "f.dividend_yield is not None and f.days_to_exdiv is not None and 0 < f.days_to_exdiv <= 10 and f.dividend_yield > 0.025"
+    strength: "(_ramp(10 - f.days_to_exdiv, 0, 10) + _ramp(f.dividend_yield*100, 2.5, 5.0)) / 2"
+    reason: "配当落ち日まで{f.days_to_exdiv}日 / 利回り{f.dividend_yield:.1%}"
+
+  - id: 37
+    name: 新興/小型株効果
+    category: D
+    data: [statements, prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.market_cap is not None and f.market_cap < 30000000000"
+    strength: "_ramp(30000000000 - f.market_cap, 0, 25000000000)"
+    reason: "時価総額{f.market_cap}円<300億"
+
+  - id: 38
+    name: 低ボラティリティ効果
+    category: D
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.volatility_60 is not None and f.volatility_60 < 0.015"
+    strength: "_ramp(f.volatility_60, 0.015, 0.005)"
+    reason: "60日日次ボラ{f.volatility_60:.2%}<1.5%"
+
+  - id: 39
+    name: 1月効果(小型)
+    category: D
+    data: [calendar]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "市場全体カレンダー効果"
+
+  - id: 40
+    name: 年末タックスロス・リバウンド
+    category: D
+    data: [calendar, prices]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "市場全体カレンダー効果"
+
+  - id: 41
+    name: 配当再投資需要
+    category: D
+    data: [calendar]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "市場全体カレンダー効果"
+
+  - id: 42
+    name: 節分天井・彼岸底
+    category: D
+    data: [calendar]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "市場全体カレンダー効果"
+
+  # ===== E. Arbitrage =====
+  - id: 43
+    name: ペアトレード
+    category: E
+    data: [prices]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "ポートフォリオレベル戦略"
+
+  - id: 44
+    name: 統計的裁定
+    category: E
+    data: [prices]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "ポートフォリオレベル戦略"
+
+  - id: 45
+    name: マーケットニュートラル
+    category: E
+    data: [prices]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "ポートフォリオレベル戦略"
+
+  - id: 46
+    name: 現物・先物裁定
+    category: E
+    data: [futures]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "先物データ要"
+
+  - id: 47
+    name: コンバージョン/リバーサル
+    category: E
+    data: [options]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "オプションデータ要"
+
+  - id: 48
+    name: 国際裁定(ADR等)
+    category: E
+    data: [foreign_prices]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "海外重複上場データ要"
+
+  - id: 49
+    name: ETF裁定
+    category: E
+    data: [etf_nav]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "ETF NAVデータ要"
+
+  - id: 50
+    name: キャリートレード
+    category: E
+    data: [rates]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "金利・配当差データ要"
+
+  - id: 51
+    name: ボラティリティ裁定
+    category: E
+    data: [options]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "IVデータ要"
+
+  - id: 52
+    name: つなぎ売り
+    category: E
+    data: [margin]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "信用売りデータ要"
+
+  # ===== F. Derivatives =====
+  - id: 53
+    name: カバードコール
+    category: F
+    data: [options]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "オプションデータ要"
+
+  - id: 54
+    name: キャッシュ確保プット売り
+    category: F
+    data: [options]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "オプションデータ要"
+
+  - id: 55
+    name: プロテクティブプット
+    category: F
+    data: [options]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "オプションデータ要"
+
+  - id: 56
+    name: クレジットスプレッド
+    category: F
+    data: [options]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "オプションデータ要"
+
+  - id: 57
+    name: ストラドル/ストラングル
+    category: F
+    data: [options]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "オプションデータ要"
+
+  - id: 58
+    name: アイアンコンドル
+    category: F
+    data: [options]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "オプションデータ要"
+
+  - id: 59
+    name: 信用レバレッジ
+    category: F
+    data: [margin]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "信用取引データ要"
+
+  - id: 60
+    name: レバ/インバースETF
+    category: F
+    data: [etf_metadata]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "ETFメタデータ要"
+
+  - id: 61
+    name: 先物スイング
+    category: F
+    data: [futures]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "先物データ要"
+
+  - id: 62
+    name: ガンマスキャルピング
+    category: F
+    data: [options, intraday]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "オプション+ティックデータ要"
+
+  # ===== G. Systematic =====
+  - id: 63
+    name: ファクター投資(複合)
+    category: G
+    data: [statements, prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.factor_value is not None and f.factor_momentum is not None and f.factor_quality is not None and f.factor_value > 0.5 and f.factor_momentum > 0.5 and f.factor_quality > 0.5"
+    strength: "(f.factor_value + f.factor_momentum + f.factor_quality) / 3 * 100"
+    reason: "Value/Mom/Quality全て市場上位50%"
+
+  - id: 64
+    name: スマートベータ
+    category: G
+    data: [statements, prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.factor_value is not None and f.factor_quality is not None and (f.factor_value + f.factor_quality)/2 > 0.7"
+    strength: "(f.factor_value + f.factor_quality) / 2 * 100"
+    reason: "Value+Quality複合スコア>70%"
+
+  - id: 65
+    name: ドルコスト平均法
+    category: G
+    data: [strategy_meta]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "個別銘柄スコア対象外(積立手法)"
+
+  - id: 66
+    name: バリュー平均法
+    category: G
+    data: [strategy_meta]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "個別銘柄スコア対象外(積立手法)"
+
+  - id: 67
+    name: リバランスボーナス
+    category: G
+    data: [strategy_meta]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "ポートフォリオレベル"
+
+  - id: 68
+    name: リスクパリティ
+    category: G
+    data: [strategy_meta]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "ポートフォリオレベル"
+
+  - id: 69
+    name: トレンドフォロー型システム
+    category: G
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.close is not None and f.sma100 is not None and f.return_3m is not None and f.close > f.sma100 and f.return_3m > 0.10"
+    strength: "_ramp(f.return_3m * 100, 10, 40)"
+    reason: "100MA上 / 3ヶ月+{f.return_3m:.1%}"
+
+  - id: 70
+    name: 平均回帰型システム
+    category: G
+    data: [prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.zscore20 is not None and f.zscore20 < -2.0"
+    strength: "_ramp(-f.zscore20, 2.0, 4.0)"
+    reason: "20日Zスコア={f.zscore20:.2f}<-2"
+
+  - id: 71
+    name: スクリーニング自動売買
+    category: G
+    data: [strategy_meta]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "メタ戦略"
+
+  - id: 72
+    name: ケリー基準サイジング
+    category: G
+    data: [strategy_meta]
+    light_compatible: true
+    implemented: false
+    expr: null
+    strength: null
+    reason: "サイジング手法"
+
+  # ===== H. Macro / Special =====
+  - id: 73
+    name: グローバルマクロ
+    category: H
+    data: [macro]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "マクロデータ要"
+
+  - id: 74
+    name: セクターローテーション
+    category: H
+    data: [sector, prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.sector_momentum_3m is not None and f.return_3m is not None and f.sector_momentum_3m > 0.10 and f.return_3m > 0"
+    strength: "(_ramp(f.sector_momentum_3m * 100, 10, 30) + _ramp(f.return_3m * 100, 0, 20)) / 2"
+    reason: "セクター3ヶ月+{f.sector_momentum_3m:.1%}"
+
+  - id: 75
+    name: テーマ投資
+    category: H
+    data: [theme_tagging]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "テーマタグデータ要"
+
+  - id: 76
+    name: アクティビスト追随
+    category: H
+    data: [large_holding_reports]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "大量保有報告データ要"
+
+  - id: 77
+    name: 役員売買の追随
+    category: H
+    data: [insider_trades]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "役員売買開示データ要"
+
+  - id: 78
+    name: 需給分析(信用・逆日歩)
+    category: H
+    data: [margin]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "信用残データ要(Standardプラン以上)"
+
+  - id: 79
+    name: 板読み/スキャルピング
+    category: H
+    data: [intraday]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "板・ティックデータ要"
+
+  - id: 80
+    name: カタリスト即時反応
+    category: H
+    data: [news]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "ニュース速報フィード要"
+
+  - id: 81
+    name: 暗号資産ファンディング裁定
+    category: H
+    data: [crypto]
+    light_compatible: false
+    implemented: false
+    expr: null
+    strength: null
+    reason: "暗号資産データ(対象外)"
+
+  - id: 82
+    name: ディストレス/再生
+    category: H
+    data: [statements, prices]
+    light_compatible: true
+    implemented: true
+    expr: "f.pbr is not None and f.return_1y is not None and f.equity_ratio is not None and 0 < f.pbr < 0.7 and f.return_1y < -0.30 and f.equity_ratio > 0.20"
+    strength: "(_ramp(f.pbr, 0.7, 0.3) + _ramp(-f.return_1y * 100, 30, 60)) / 2"
+    reason: "PBR{f.pbr:.2f}/1Y{f.return_1y:.1%}/自己資本{f.equity_ratio:.1%}"
