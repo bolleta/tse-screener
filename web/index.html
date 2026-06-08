@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>1ヶ月で N倍 スクリーナー — J-Quants</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #1a2030; --panel2: #232b3d; --line: #2e3850;
+    --fg: #e6ebf5; --muted: #93a0bd; --accent: #4f8cff; --accent2: #2bd4a0;
+    --up: #ff5c7a; --warn: #ffb454;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic UI", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.5;
+  }
+  header {
+    padding: 18px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .wrap { display: grid; grid-template-columns: 300px 1fr; gap: 0; min-height: calc(100vh - 60px); }
+  aside {
+    background: var(--panel); border-right: 1px solid var(--line);
+    padding: 18px; overflow-y: auto;
+  }
+  main { padding: 20px 24px; overflow-x: auto; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .field input {
+    width: 100%; padding: 8px 10px; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 8px; color: var(--fg); font-size: 14px;
+  }
+  .field .hint { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button {
+    cursor: pointer; border: none; border-radius: 8px; font-size: 14px; font-weight: 600;
+    padding: 10px 14px; color: #fff; background: var(--accent);
+  }
+  button:disabled { opacity: .5; cursor: progress; }
+  button.run { width: 100%; margin-top: 6px; }
+  button.ghost { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); font-weight: 500; }
+  .saved-item {
+    padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px;
+    cursor: pointer; background: var(--panel2); transition: border-color .15s;
+  }
+  .saved-item:hover { border-color: var(--accent); }
+  .saved-item .id { font-size: 12px; color: var(--accent); font-family: ui-monospace, monospace; }
+  .saved-item .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .saved-item .cnt { float: right; font-weight: 700; color: var(--accent2); }
+  .summary {
+    display: flex; gap: 22px; flex-wrap: wrap; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 18px; margin-bottom: 16px;
+  }
+  .summary .kpi { display: flex; flex-direction: column; }
+  .summary .kpi b { font-size: 22px; }
+  .summary .kpi span { font-size: 11px; color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--bg); font-size: 11px; }
+  td.l, th.l { text-align: left; }
+  tbody tr.clickable { cursor: pointer; }
+  tbody tr:hover { background: var(--panel); }
+  tbody tr.clickable:hover td:nth-child(2) { color: var(--accent); }
+  .ratio { color: var(--accent2); font-weight: 700; }
+  .pct { color: var(--up); font-weight: 600; }
+  .code { font-family: ui-monospace, monospace; color: var(--muted); }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--panel2); color: var(--muted); }
+  #status { color: var(--warn); font-size: 13px; margin: 8px 0; min-height: 18px; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  a.dl { color: var(--accent); font-size: 13px; text-decoration: none; }
+  a.dl:hover { text-decoration: underline; }
+  .spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--line); border-top-color: var(--accent); border-radius:50%; animation: spin .8s linear infinite; vertical-align:-2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* ===== タブ ===== */
+  nav.tabs { display:flex; gap:4px; padding:0 24px; border-bottom:1px solid var(--line); }
+  nav.tabs button { background:none; border:none; color:var(--muted); font-size:14px; font-weight:600;
+    padding:12px 16px; cursor:pointer; border-bottom:2px solid transparent; border-radius:0; }
+  nav.tabs button.active { color:var(--fg); border-bottom-color:var(--accent); }
+  body.ranking-mode aside { display:none; }
+  body.ranking-mode .wrap { grid-template-columns: 1fr; }
+  /* ===== ランキング遷移ビュー ===== */
+  .rk-controls { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; margin-bottom:14px; }
+  .rk-controls .field { margin:0; }
+  .rk-controls input { width:92px; }
+  .rk-controls input#rkHighlight { width:220px; }
+  .rk-chartwrap { position:relative; height:calc(100vh - 270px); min-height:420px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 14px; }
+  .rk-legendhint { color:var(--muted); font-size:12px; margin-top:8px; }
+  #rkStatus { color:var(--warn); font-size:13px; min-height:18px; margin-bottom:8px; }
+  /* ===== ランキング表（横=週 / 縦=順位） ===== */
+  .rk-tablewrap { margin-top:16px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+  .rk-tabletitle { font-size:12px; color:var(--muted); padding:10px 14px; border-bottom:1px solid var(--line); }
+  .rk-tabletitle b { color:var(--fg); }
+  #rkTable { max-height:60vh; overflow:auto; }
+  table.rk-table { border-collapse:separate; border-spacing:0; font-size:12px; width:max-content; }
+  table.rk-table th, table.rk-table td { border-bottom:1px solid var(--line); border-right:1px solid var(--line); padding:4px 9px; text-align:center; white-space:nowrap; }
+  table.rk-table th { position:sticky; top:0; z-index:2; background:var(--bg); color:var(--muted); font-weight:600; }
+  table.rk-table th.rk-rankh, td.rk-rank { position:sticky; left:0; background:var(--panel2); color:var(--muted); font-family:ui-monospace, monospace; }
+  table.rk-table th.rk-rankh { z-index:3; }
+  td.rk-rank { z-index:1; }
+  td.rk-cell { cursor:pointer; }
+  td.rk-cell:hover { background:var(--panel2); }
+  td.rk-cell.rk-sel { background:var(--accent); }
+  td.rk-cell.rk-sel .rk-cpct { color:#fff; }
+  .rk-cname { display:block; }
+  .rk-cpct { display:block; font-size:10px; color:var(--accent2); margin-top:1px; }
+  td.rk-empty { color:var(--line); }
+  /* ===== 戦略スクリーナー ===== */
+  .strat-desc { color:var(--muted); font-size:12px; margin:0 0 12px; padding:10px 14px;
+    background:var(--panel); border:1px solid var(--line); border-radius:8px; line-height:1.6; }
+  .strat-desc b { color:var(--accent2); }
+  .rk-controls select { width:auto; padding:8px 10px; background:var(--panel2);
+    border:1px solid var(--line); border-radius:8px; color:var(--fg); font-size:13px; }
+  .strat-params { border-left:2px solid var(--accent); padding-left:14px; margin-left:4px;
+    display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
+  .st-status { color:var(--warn); font-size:13px; min-height:18px; margin:8px 0; }
+  .saved-box { margin:6px 0 14px; }
+  .saved-box > summary { cursor:pointer; font-size:12px; color:var(--muted); padding:6px 0; user-select:none; }
+  .saved-box > summary:hover { color:var(--fg); }
+  .st-saved-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:8px; margin-top:8px; }
+  .st-toolbar { display:flex; gap:14px; align-items:center; margin:10px 0; flex-wrap:wrap; }
+  .ov-count { font-weight:700; color:var(--accent2); }
+  .ov-rk { color:var(--muted); }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>📈 1ヶ月で N倍 スクリーナー</h1>
+  <span class="sub">J-Quants V2 日足 (調整後終値) / 株式分割は自動補正</span>
+</header>
+
+<nav class="tabs">
+  <button data-tab="screener" class="active" onclick="switchTab('screener')">🔍 スクリーナー</button>
+  <button data-tab="ranking" onclick="switchTab('ranking')">📊 ランキング遷移</button>
+  <button data-tab="st_momentum" onclick="switchTab('st_momentum')">① モメンタム加速</button>
+  <button data-tab="st_volume" onclick="switchTab('st_volume')">② 出来高急増</button>
+  <button data-tab="st_vcp" onclick="switchTab('st_vcp')">③ ボラ収縮VCP</button>
+  <button data-tab="st_newhigh" onclick="switchTab('st_newhigh')">④ 新高値</button>
+  <button data-tab="st_overlap" onclick="switchTab('st_overlap')">⑤ 複合（重複）</button>
+</nav>
+
+<div class="wrap">
+  <!-- ===== 左: 検索フォーム + 保存済み ===== -->
+  <aside>
+    <h2>検索条件</h2>
+    <div class="field">
+      <label>倍率しきい値</label>
+      <input id="multiple" type="number" step="0.1" min="1" value="2">
+      <div class="hint">例: 2 = 2倍以上</div>
+    </div>
+    <div class="field">
+      <label>期間（暦日）</label>
+      <input id="days" type="number" min="1" value="30">
+      <div class="hint">30 ≒ 1ヶ月。祝日は自動で前営業日へ</div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>最低株価</label>
+        <input id="min_price" type="number" min="0" placeholder="任意">
+      </div>
+      <div class="field">
+        <label>最低売買代金</label>
+        <input id="min_turnover" type="number" min="0" placeholder="円・任意">
+      </div>
+    </div>
+    <div class="field">
+      <label>表示件数</label>
+      <input id="top" type="number" min="1" value="100">
+    </div>
+    <button class="run" id="runBtn" onclick="runSearch()">🔍 検索を実行</button>
+    <div id="status"></div>
+
+    <h2 style="margin-top:22px;">保存済み検索</h2>
+    <div id="savedList"><div class="empty" style="padding:10px;">読み込み中…</div></div>
+    <button class="ghost" style="width:100%;margin-top:4px;" onclick="loadSaved()">↻ 一覧を更新</button>
+  </aside>
+
+  <!-- ===== 右: 結果 ===== -->
+  <main>
+    <!-- タブ1: スクリーナー -->
+    <div id="tab-screener">
+      <div id="summary"></div>
+      <div class="toolbar" id="toolbar" style="display:none;">
+        <a class="dl" id="csvLink" href="#">⬇ CSVダウンロード</a>
+        <span style="color:var(--muted);font-size:12px;">💡 行をクリックで日足チャート</span>
+      </div>
+      <div id="results"><div class="empty">左の条件で「検索を実行」するか、保存済み検索を選んでください。</div></div>
+    </div>
+
+    <!-- タブ2: ランキング遷移 (バンプチャート) -->
+    <div id="tab-ranking" style="display:none;">
+      <div class="rk-controls">
+        <div class="field">
+          <label>週数（横軸）</label>
+          <input id="rkWeeks" type="number" min="2" max="26" value="8">
+        </div>
+        <div class="field">
+          <label>上位（縦軸）</label>
+          <input id="rkTop" type="number" min="5" max="300" value="100">
+        </div>
+        <div class="field">
+          <label>上昇率の期間(日)</label>
+          <input id="rkDays" type="number" min="1" max="120" value="30">
+        </div>
+        <button class="run" style="width:auto;margin:0;" id="rkBtn" onclick="loadRanking()">📊 描画</button>
+        <div class="field">
+          <label>銘柄ハイライト（コード/名前）</label>
+          <input id="rkHighlight" type="text" placeholder="例: サクシード / 92560" oninput="applyHighlight()">
+        </div>
+      </div>
+      <div id="rkStatus"></div>
+      <div class="rk-chartwrap"><canvas id="rkCanvas"></canvas></div>
+      <div class="rk-legendhint">
+        横軸=週次スナップショット日 / 縦軸=その週の「過去<span id="rkDaysLbl">30</span>日上昇率」ランキング（上が上位）。
+        各週でTop<span id="rkTopLbl">100</span>に入った銘柄のみ線を描画（圏外の週は線が途切れます）。
+        線・点をクリックでその銘柄の日足チャートへ。
+      </div>
+      <div class="rk-tablewrap" id="rkTableWrap" style="display:none;">
+        <div class="rk-tabletitle">上昇率ランキング表（横=週次日付 / 縦=順位）｜<b>セルの銘柄をクリックでその銘柄だけ図に表示・もう一度クリックで全表示</b></div>
+        <div id="rkTable"></div>
+      </div>
+    </div>
+
+    <!-- タブ3-6: 戦略スクリーナー (JSで動的生成) -->
+    <div id="strategyTabs"></div>
+  </main>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// API由来の文字列(銘柄名/業種/市場)をinnerHTMLに入れる際のエスケープ
+function esc(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function fmtNum(n, d = 0) {
+  if (n === null || n === undefined || n === "") return "—";
+  return Number(n).toLocaleString("ja-JP", { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function fmtOku(yen) {
+  if (yen === null || yen === undefined || yen === "") return "—";
+  return (Number(yen) / 1e8).toLocaleString("ja-JP", { maximumFractionDigits: 2 }) + "億";
+}
+
+function renderRecord(rec) {
+  const m = rec.meta, rows = rec.results || [];
+  $("summary").innerHTML = `
+    <div class="summary">
+      <div class="kpi"><b>${m.hit_count}</b><span>該当銘柄</span></div>
+      <div class="kpi"><b>${m.multiple}x</b><span>しきい値</span></div>
+      <div class="kpi"><b>${m.date_then} → ${m.date_now}</b><span>比較区間（${m.calendar_days}日）</span></div>
+      <div class="kpi"><b>${fmtNum(m.universe_size)}</b><span>母数（両日に存在）</span></div>
+      <div class="kpi"><span class="badge">${m.search_id}</span></div>
+    </div>`;
+  $("toolbar").style.display = rows.length ? "flex" : "none";
+  $("csvLink").href = `/api/csv?id=${encodeURIComponent(m.search_id)}`;
+
+  if (!rows.length) {
+    $("results").innerHTML = `<div class="empty">条件に該当する銘柄はありませんでした。</div>`;
+    return;
+  }
+  const body = rows.map(r => `
+    <tr class="clickable" title="日足チャートを表示"
+        onclick="location.href='chart.html?code=${encodeURIComponent(r.code)}&name=${encodeURIComponent(r.name || "")}'">
+      <td>${r.rank}</td>
+      <td class="l code">${r.code}</td>
+      <td class="l">${r.name || ""}</td>
+      <td class="ratio">${Number(r.ratio).toFixed(2)}x</td>
+      <td class="pct">+${Number(r.pct_change).toFixed(1)}%</td>
+      <td>${fmtNum(r.price_then, 1)}</td>
+      <td>${fmtNum(r.price_now, 1)}</td>
+      <td class="l">${r.sector33_name || ""}</td>
+      <td class="l"><span class="badge">${r.market || ""}</span></td>
+      <td>${fmtOku(r.turnover_now)}</td>
+    </tr>`).join("");
+  $("results").innerHTML = `
+    <table>
+      <thead><tr>
+        <th>順</th><th class="l">コード</th><th class="l">銘柄名</th>
+        <th>倍率</th><th>騰落率</th><th>前株価</th><th>現株価</th>
+        <th class="l">業種33</th><th class="l">市場</th><th>売買代金</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>`;
+}
+
+async function runSearch() {
+  const btn = $("runBtn");
+  btn.disabled = true;
+  $("status").innerHTML = `<span class="spinner"></span> J-Quantsから取得中…（初回は十数秒かかります）`;
+  const payload = {
+    multiple: $("multiple").value,
+    days: $("days").value,
+    top: $("top").value,
+    min_price: $("min_price").value || null,
+    min_turnover: $("min_turnover").value || null,
+  };
+  try {
+    const res = await fetch("/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    renderRecord(data);
+    $("status").textContent = "";
+    loadSaved();
+  } catch (e) {
+    $("status").innerHTML = `⚠️ エラー: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadSaved() {
+  try {
+    const res = await fetch("/api/list");
+    const data = await res.json();
+    const list = data.searches || [];
+    if (!list.length) {
+      $("savedList").innerHTML = `<div class="empty" style="padding:10px;font-size:12px;">まだありません</div>`;
+      return;
+    }
+    $("savedList").innerHTML = list.map(m => `
+      <div class="saved-item" onclick="showSaved('${m.search_id}')">
+        <span class="cnt">${m.hit_count}</span>
+        <div class="id">${m.search_id}</div>
+        <div class="meta">${m.multiple}倍/${m.window_days}日 · ${m.date_then}→${m.date_now}</div>
+        <div class="meta">${(m.created_at || "").replace("T", " ")}</div>
+      </div>`).join("");
+  } catch (e) {
+    $("savedList").innerHTML = `<div class="empty" style="padding:10px;">一覧取得失敗</div>`;
+  }
+}
+
+async function showSaved(id) {
+  $("status").innerHTML = `<span class="spinner"></span> 読み込み中…`;
+  try {
+    const res = await fetch(`/api/show?id=${encodeURIComponent(id)}`);
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    renderRecord(data);
+    $("status").textContent = "";
+  } catch (e) {
+    $("status").innerHTML = `⚠️ ${e.message}`;
+  }
+}
+
+// ===== タブ切替 =====
+const ALL_TABS = ["screener", "ranking", "st_momentum", "st_volume", "st_vcp", "st_newhigh", "st_overlap"];
+function switchTab(name) {
+  document.querySelectorAll("nav.tabs button").forEach(b =>
+    b.classList.toggle("active", b.dataset.tab === name));
+  ALL_TABS.forEach(t => {
+    const el = $("tab-" + t);
+    if (el) el.style.display = (t === name) ? "" : "none";
+  });
+  // スクリーナー以外は左の検索フォームを隠して全幅表示
+  document.body.classList.toggle("ranking-mode", name !== "screener");
+  if (name === "ranking" && !rkChart && !rkLoading) loadRanking();
+  autoLoadTab(name);  // 戦略/複合タブは保存済み最新結果を自動表示
+}
+
+// ===== ランキング遷移 (バンプチャート) =====
+let rkChart = null, rkLoading = false, rkSelectedCode = null;
+
+function hueFor(i) { return Math.round((i * 137.508) % 360); }
+
+async function loadRanking() {
+  if (typeof Chart === "undefined") {
+    $("rkStatus").innerHTML = "⚠️ チャートライブラリ(Chart.js)を読み込めませんでした（ネット接続を確認）";
+    return;
+  }
+  rkLoading = true;
+  $("rkBtn").disabled = true;
+  const weeks = $("rkWeeks").value, top = $("rkTop").value, days = $("rkDays").value;
+  $("rkDaysLbl").textContent = days;
+  $("rkTopLbl").textContent = top;
+  $("rkStatus").innerHTML = `<span class="spinner"></span> 週次ランキングを計算中…（初回は十数秒）`;
+  try {
+    const res = await fetch(`/api/ranking_trend?weeks=${weeks}&top=${top}&days=${days}`);
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    renderRanking(data);
+    $("rkStatus").innerHTML =
+      `${data.snapshots.length}週 / Top${data.meta.top} に入った <b>${data.meta.universe}</b> 銘柄を表示`;
+  } catch (e) {
+    $("rkStatus").innerHTML = `⚠️ エラー: ${e.message}`;
+  } finally {
+    rkLoading = false;
+    $("rkBtn").disabled = false;
+  }
+}
+
+function renderRanking(data) {
+  rkSelectedCode = null;
+  const labels = data.snapshots;
+  const top = data.meta.top;
+  const datasets = data.series.map((s, i) => {
+    const h = hueFor(i);
+    return {
+      label: `${s.code} ${s.name}`,
+      data: s.ranks,
+      _code: s.code, _name: s.name, _pcts: s.pcts, _hue: h,
+      borderColor: `hsla(${h},70%,60%,0.85)`,
+      backgroundColor: `hsla(${h},70%,60%,0.85)`,
+      borderWidth: 1.5, pointRadius: 2.5, pointHoverRadius: 6,
+      tension: 0, spanGaps: false,
+    };
+  });
+  if (rkChart) rkChart.destroy();
+  rkChart = new Chart($("rkCanvas").getContext("2d"), {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: "nearest", intersect: false },
+      scales: {
+        y: {
+          reverse: true, min: 0.5, max: Number(top) + 0.5,
+          title: { display: true, text: "順位（上＝上位）", color: "#93a0bd" },
+          ticks: { color: "#93a0bd", stepSize: Math.max(1, Math.round(top / 10)) },
+          grid: { color: "#1a2030" },
+        },
+        x: {
+          title: { display: true, text: "週次スナップショット日", color: "#93a0bd" },
+          ticks: { color: "#93a0bd" }, grid: { color: "#1a2030" },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => labels[items[0].dataIndex],
+            label: (it) => {
+              const ds = it.dataset, j = it.dataIndex;
+              const pct = ds._pcts[j];
+              return `${ds._code} ${ds._name}: ${it.formattedValue}位` +
+                     (pct != null ? ` (上昇率 +${pct}%)` : "");
+            },
+          },
+        },
+      },
+      onClick: (e, els) => {
+        if (!els.length) return;
+        const ds = rkChart.data.datasets[els[0].datasetIndex];
+        location.href = `chart.html?code=${encodeURIComponent(ds._code)}&name=${encodeURIComponent(ds._name)}`;
+      },
+    },
+  });
+  renderRankingTable(data);
+}
+
+// ===== ランキング表（横=週 / 縦=順位）=====
+function renderRankingTable(data) {
+  const snaps = data.snapshots;
+  const top = Number(data.meta.top);
+  // 週ごとに「順位 → 銘柄」を引けるよう展開
+  const byWeek = snaps.map(() => ({}));
+  data.series.forEach(s => {
+    s.ranks.forEach((r, w) => {
+      if (r != null) byWeek[w][r] = { code: s.code, name: s.name, pct: s.pcts[w] };
+    });
+  });
+  let h = '<table class="rk-table"><thead><tr><th class="rk-rankh">順位</th>';
+  snaps.forEach(d => h += `<th>${d}</th>`);
+  h += '</tr></thead><tbody>';
+  for (let rank = 1; rank <= top; rank++) {
+    h += `<tr><td class="rk-rank">${rank}</td>`;
+    for (let w = 0; w < snaps.length; w++) {
+      const c = byWeek[w][rank];
+      if (c) {
+        h += `<td class="rk-cell" data-code="${c.code}" title="${c.name} だけを図に表示／もう一度で全表示">` +
+             `<span class="rk-cname">${c.name}</span>` +
+             `<span class="rk-cpct">+${c.pct}%</span></td>`;
+      } else {
+        h += '<td class="rk-empty">·</td>';
+      }
+    }
+    h += '</tr>';
+  }
+  h += '</tbody></table>';
+  $("rkTable").innerHTML = h;
+  $("rkTableWrap").style.display = "block";
+  // セルクリックで絞り込みトグル（イベント委譲）
+  $("rkTable").onclick = (e) => {
+    const td = e.target.closest(".rk-cell");
+    if (td) toggleRkSelect(td.dataset.code);
+  };
+  highlightRkTable();
+}
+
+function toggleRkSelect(code) {
+  rkSelectedCode = (rkSelectedCode === code) ? null : code;
+  applyRkSelection();
+}
+
+function applyRkSelection() {
+  if (rkChart) {
+    // 選択中はその銘柄以外を非表示、未選択なら全表示
+    rkChart.data.datasets.forEach(ds => {
+      ds.hidden = rkSelectedCode ? (ds._code !== rkSelectedCode) : false;
+    });
+    rkChart.update("none");
+  }
+  highlightRkTable();
+}
+
+function highlightRkTable() {
+  document.querySelectorAll("#rkTable .rk-cell").forEach(td => {
+    td.classList.toggle("rk-sel", !!rkSelectedCode && td.dataset.code === rkSelectedCode);
+  });
+}
+
+function applyHighlight() {
+  if (!rkChart) return;
+  const q = $("rkHighlight").value.trim().toLowerCase();
+  rkChart.data.datasets.forEach(ds => {
+    const hit = !q || ds._code.toLowerCase().includes(q) || (ds._name || "").toLowerCase().includes(q);
+    const a = q ? (hit ? 0.95 : 0.07) : 0.85;
+    ds.borderColor = `hsla(${ds._hue},70%,60%,${a})`;
+    ds.backgroundColor = ds.borderColor;
+    ds.borderWidth = (q && hit) ? 3 : 1.5;
+    ds.pointRadius = (q && hit) ? 3.5 : 2.5;
+  });
+  rkChart.update("none");
+}
+
+// ===== 戦略スクリーナー (①〜④を別タブで動的生成) =====
+const STRATS = [
+  {
+    key: "st_momentum", strategy: "momentum", title: "① モメンタム加速（継続ブレイク）",
+    lookback: 70,
+    desc: "短期(5日)が中期(20日)より速く<b>加速中</b>で、25日移動平均より上、かつ既に一定のトレンドが出ている銘柄を抽出。2倍化の多くは『すでに動意づいた銘柄の2段目』という前提に立つ<b>順張り初動</b>戦略。",
+    params: [
+      { id: "min_r60", label: "60日上昇率の下限(%)", value: 10, step: 1 },
+    ],
+  },
+  {
+    key: "st_volume", strategy: "volume", title: "② 出来高急増ブレイク",
+    lookback: 70,
+    desc: "売買代金が直近平均比で<b>急増</b>し、同時に直近高値を上抜いた当日陽線を抽出。大相場の燃料＝出来高の膨張を伴う『初動』を捕まえる。",
+    params: [
+      { id: "vol_mult", label: "出来高倍率しきい", value: 3, step: 0.5 },
+      { id: "vol_base", label: "基準日数", value: 20, step: 1 },
+    ],
+  },
+  {
+    key: "st_vcp", strategy: "vcp", title: "③ ボラティリティ収縮（VCP / スクイーズ）",
+    lookback: 70,
+    desc: "値幅・変動率が<b>収縮し切った</b>高値圏の保ち合いを抽出（Minervini VCP）。爆発前のコイル状態を狙う。凍結銘柄（値幅ほぼ0の非流動）は自動除外。",
+    params: [
+      { id: "vcp_contraction", label: "収縮比しきい", value: 1.3, step: 0.1 },
+      { id: "vcp_tight", label: "値幅上限(比)", value: 0.20, step: 0.01 },
+    ],
+  },
+  {
+    key: "st_newhigh", strategy: "newhigh", title: "④ 新高値ブレイク",
+    lookback: 240,
+    desc: "参照期間内の高値を更新した<b>新高値ブレイク</b>を抽出。上値抵抗がなく最大の上昇の起点になりやすい。土台（保ち合い）が長いほど高評価。<b>初回はデータ取得で1〜3分</b>かかる場合あり。",
+    params: [
+      { id: "min_bars", label: "高値ルックバック(営業日)", value: 120, step: 10 },
+      { id: "nh_hi", label: "新高値超の上限倍率", value: 1.20, step: 0.01 },
+    ],
+  },
+];
+
+function panelHTML(st) {
+  const sp = st.params.map(p =>
+    `<div class="field"><label>${p.label}</label>` +
+    `<input data-sp="${p.id}" type="number" step="${p.step}" value="${p.value}"></div>`).join("");
+  return `
+    <p class="strat-desc">${st.desc}</p>
+    <div class="rk-controls">
+      <div class="field"><label>対象市場</label>
+        <select data-f="market">
+          <option value="small">小型(グロース/スタンダード)</option>
+          <option value="all">全市場</option>
+        </select></div>
+      <div class="field"><label>最低売買代金(円)</label><input data-f="min_turnover" type="number" value="30000000"></div>
+      <div class="field"><label>最高売買代金(円・0で無制限)</label><input data-f="max_turnover" type="number" value="5000000000"></div>
+      <div class="field"><label>最低株価</label><input data-f="min_price" type="number" value="100"></div>
+      <div class="field"><label>最高株価(0で無制限)</label><input data-f="max_price" type="number" value="10000"></div>
+      <div class="strat-params">${sp}
+        <div class="field"><label>参照営業日数</label><input data-f="lookback" type="number" value="${st.lookback}"></div>
+      </div>
+      <div class="field"><label>表示件数</label><input data-f="top" type="number" value="100"></div>
+      <button class="run st-run" style="width:auto;margin:0;">🔍 スクリーニング</button>
+    </div>
+    <div class="st-status"></div>
+    <details class="saved-box">
+      <summary>📁 保存済み結果（クリックで一覧 / 選ぶと再計算なしで再表示）</summary>
+      <div class="st-saved-list"></div>
+    </details>
+    <div class="st-summary"></div>
+    <div class="st-results"><div class="empty">条件を設定して「スクリーニング」を押してください。結果は自動保存されます。</div></div>`;
+}
+
+function buildStrategyPanels() {
+  const host = $("strategyTabs");
+  STRATS.forEach(st => {
+    const div = document.createElement("div");
+    div.id = "tab-" + st.key;
+    div.style.display = "none";
+    div.innerHTML = panelHTML(st);
+    host.appendChild(div);
+    div.querySelector(".st-run").onclick = () => runStrategy(st);
+  });
+}
+
+async function runStrategy(st) {
+  const panel = $("tab-" + st.key);
+  const params = new URLSearchParams({ strategy: st.strategy });
+  // 共通フィルタ
+  panel.querySelectorAll("[data-f]").forEach(el => {
+    if (el.value !== "") params.set(el.dataset.f, el.value);
+  });
+  // 戦略固有パラメータ
+  panel.querySelectorAll("[data-sp]").forEach(el => {
+    if (el.value !== "") params.set(el.dataset.sp, el.value);
+  });
+  const btn = panel.querySelector(".st-run");
+  const status = panel.querySelector(".st-status");
+  btn.disabled = true;
+  status.innerHTML = `<span class="spinner"></span> スクリーニング中…（初回はデータ取得に時間がかかります）`;
+  try {
+    const res = await fetch("/api/strategy_screen?" + params.toString());
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    renderStrategy(panel, data);
+    status.textContent = "";
+    autoLoaded.add(st.key);
+    refreshSaved();
+  } catch (e) {
+    status.innerHTML = `⚠️ エラー: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderStrategy(panel, data) {
+  const m = data.meta, cols = data.columns || [], rows = data.results || [];
+  panel.querySelector(".st-summary").innerHTML = `
+    <div class="summary">
+      <div class="kpi"><b>${m.hit_count}</b><span>該当銘柄</span></div>
+      <div class="kpi"><b>${fmtNum(m.universe)}</b><span>フィルタ通過(母数)</span></div>
+      <div class="kpi"><b>${m.date_now}</b><span>基準日</span></div>
+      <div class="kpi"><b>${m.lookback}</b><span>参照営業日数</span></div>
+    </div>
+    <div class="st-toolbar">
+      <a class="dl" href="/api/strategy_csv?id=${encodeURIComponent(m.search_id)}">⬇ CSVダウンロード</a>
+      <span class="badge">${esc(m.search_id)}</span>
+      <span style="color:var(--muted);font-size:12px;">💡 行クリックで日足チャート</span>
+    </div>`;
+  const res = panel.querySelector(".st-results");
+  if (!rows.length) {
+    res.innerHTML = `<div class="empty">該当銘柄なし。しきい値を緩めるか、対象市場を「全市場」にしてみてください。</div>`;
+    return;
+  }
+  const head = `<tr><th>順</th><th class="l">コード</th><th class="l">銘柄名</th><th>スコア</th>` +
+    cols.map(c => `<th>${c.label}</th>`).join("") +
+    `<th>株価</th><th>売買代金</th><th class="l">業種33</th><th class="l">市場</th></tr>`;
+  const body = rows.map(r => `
+    <tr class="clickable" title="日足チャートを表示"
+        onclick="location.href='chart.html?code=${encodeURIComponent(r.code)}&name=${encodeURIComponent(r.name || "")}'">
+      <td>${r.rank}</td>
+      <td class="l code">${esc(r.code)}</td>
+      <td class="l">${esc(r.name)}</td>
+      <td class="ratio">${r.score}</td>
+      ${cols.map(c => `<td>${r[c.key] ?? "—"}</td>`).join("")}
+      <td>${fmtNum(r.price_now, 1)}</td>
+      <td>${fmtOku(r.turnover_now)}</td>
+      <td class="l">${esc(r.sector33_name)}</td>
+      <td class="l"><span class="badge">${esc(r.market)}</span></td>
+    </tr>`).join("");
+  res.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+// ===== ⑤ 複合（重複）タブ =====
+const OV_LABELS = { momentum: "①Mom", volume: "②Vol", vcp: "③VCP", newhigh: "④New" };
+
+function buildOverlapPanel() {
+  const div = document.createElement("div");
+  div.id = "tab-st_overlap";
+  div.style.display = "none";
+  div.innerHTML = `
+    <p class="strat-desc">①〜④の全戦略を実行し、<b>複数戦略に同時出現した銘柄</b>を重複数の多い順にランキング。複数のサインが重なる＝より確度の高い初動候補。各戦略の上位<b>「対象上位件数」</b>を突き合わせます。④新高値を含むため<b>初回はデータ取得で1〜3分</b>かかる場合あり。</p>
+    <div class="rk-controls">
+      <div class="field"><label>対象市場</label>
+        <select data-f="market"><option value="small">小型(グロース/スタンダード)</option><option value="all">全市場</option></select></div>
+      <div class="field"><label>最低売買代金(円)</label><input data-f="min_turnover" type="number" value="30000000"></div>
+      <div class="field"><label>最高売買代金(円・0で無制限)</label><input data-f="max_turnover" type="number" value="5000000000"></div>
+      <div class="field"><label>最低株価</label><input data-f="min_price" type="number" value="100"></div>
+      <div class="field"><label>最高株価(0で無制限)</label><input data-f="max_price" type="number" value="10000"></div>
+      <div class="strat-params">
+        <div class="field"><label>各戦略の対象上位件数</label><input data-f="per_top" type="number" value="100"></div>
+      </div>
+      <div class="field"><label>表示件数</label><input data-f="top" type="number" value="100"></div>
+      <button class="run ov-run" style="width:auto;margin:0;">🔀 複合スクリーニング</button>
+    </div>
+    <div class="st-status"></div>
+    <details class="saved-box">
+      <summary>📁 保存済み結果（クリックで一覧 / 選ぶと再計算なしで再表示）</summary>
+      <div class="st-saved-list"></div>
+    </details>
+    <div class="st-summary"></div>
+    <div class="st-results"><div class="empty">「複合スクリーニング」を押すと①〜④を実行し、重複の多い銘柄を抽出します。結果は自動保存されます。</div></div>`;
+  $("strategyTabs").appendChild(div);
+  div.querySelector(".ov-run").onclick = () => runOverlap();
+}
+
+async function runOverlap() {
+  const panel = $("tab-st_overlap");
+  const params = new URLSearchParams();
+  panel.querySelectorAll("[data-f]").forEach(el => {
+    if (el.value !== "") params.set(el.dataset.f, el.value);
+  });
+  const btn = panel.querySelector(".ov-run");
+  const status = panel.querySelector(".st-status");
+  btn.disabled = true;
+  status.innerHTML = `<span class="spinner"></span> ①〜④を実行中…（④新高値を含むため初回は1〜3分かかります）`;
+  try {
+    const res = await fetch("/api/overlap_screen?" + params.toString());
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    renderOverlap(panel, data);
+    status.textContent = "";
+    autoLoaded.add("st_overlap");
+    refreshSaved();
+  } catch (e) {
+    status.innerHTML = `⚠️ エラー: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderOverlap(panel, data) {
+  const m = data.meta, order = data.order || ["momentum", "volume", "vcp", "newhigh"], rows = data.results || [];
+  const pc = m.per_strategy_counts || {};
+  panel.querySelector(".st-summary").innerHTML = `
+    <div class="summary">
+      <div class="kpi"><b>${m.multi_count}</b><span>2戦略以上に重複</span></div>
+      <div class="kpi"><b>${m.hit_count}</b><span>表示件数</span></div>
+      <div class="kpi"><b>${m.date_now}</b><span>基準日</span></div>
+      <div class="kpi"><b>${order.map(s => OV_LABELS[s] + ":" + (pc[s] ?? 0)).join(" / ")}</b><span>各戦略の該当数</span></div>
+    </div>
+    <div class="st-toolbar">
+      <a class="dl" href="/api/strategy_csv?id=${encodeURIComponent(m.search_id)}">⬇ CSVダウンロード</a>
+      <span class="badge">${esc(m.search_id)}</span>
+      <span style="color:var(--muted);font-size:12px;">💡 行クリックで日足チャート</span>
+    </div>`;
+  const res = panel.querySelector(".st-results");
+  if (!rows.length) {
+    res.innerHTML = `<div class="empty">該当銘柄なし。各戦略のしきい値や対象上位件数を見直してください。</div>`;
+    return;
+  }
+  const head = `<tr><th>順</th><th class="l">コード</th><th class="l">銘柄名</th><th>重複数</th>` +
+    order.map(s => `<th title="${s}内の順位">${OV_LABELS[s]}</th>`).join("") +
+    `<th>株価</th><th>売買代金</th><th class="l">業種33</th><th class="l">市場</th></tr>`;
+  const body = rows.map(r => `
+    <tr class="clickable" title="日足チャートを表示"
+        onclick="location.href='chart.html?code=${encodeURIComponent(r.code)}&name=${encodeURIComponent(r.name || "")}'">
+      <td>${r.rank}</td>
+      <td class="l code">${esc(r.code)}</td>
+      <td class="l">${esc(r.name)}</td>
+      <td class="ov-count">${r.count}</td>
+      ${order.map(s => `<td class="ov-rk">${r["rk_" + s] ?? "—"}</td>`).join("")}
+      <td>${fmtNum(r.price_now, 1)}</td>
+      <td>${fmtOku(r.turnover_now)}</td>
+      <td class="l">${esc(r.sector33_name)}</td>
+      <td class="l"><span class="badge">${esc(r.market)}</span></td>
+    </tr>`).join("");
+  res.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+// ===== 保存済み結果の一覧 / 再表示（全戦略タブ共通） =====
+let savedMetas = null;             // 保存メタのキャッシュ(null=未取得)
+const autoLoaded = new Set();      // 自動表示済みのタブ(ユーザー操作を上書きしない)
+
+async function getSavedMetas(force) {
+  if (savedMetas && !force) return savedMetas;
+  try {
+    const res = await fetch("/api/strategy_list");
+    savedMetas = (await res.json()).searches || [];
+  } catch (e) { savedMetas = []; }
+  return savedMetas;
+}
+
+async function refreshSaved() {
+  const metas = await getSavedMetas(true);
+  STRATS.forEach(st => {
+    const c = document.querySelector("#tab-" + st.key + " .st-saved-list");
+    if (c) renderSavedInto(c, metas.filter(m => m.strategy === st.strategy));
+  });
+  const oc = document.querySelector("#tab-st_overlap .st-saved-list");
+  if (oc) renderSavedInto(oc, metas.filter(m => m.kind === "overlap"));
+}
+
+// 戦略/複合タブを開いた時、未ロードなら保存済みの最新結果を自動表示する
+async function autoLoadTab(name) {
+  if (!name.startsWith("st_") || autoLoaded.has(name)) return;
+  const metas = await getSavedMetas();
+  // list_saved はファイル名降順=新しい順なので find が最新を拾う
+  const meta = (name === "st_overlap")
+    ? metas.find(m => m.kind === "overlap")
+    : metas.find(m => m.strategy === name.slice(3));
+  if (meta) await openSaved(meta.search_id);
+  else autoLoaded.add(name);  // 保存が無ければ空表示のまま(再試行しない)
+}
+
+function renderSavedInto(container, metas) {
+  if (!metas.length) {
+    container.innerHTML = `<div class="empty" style="padding:8px;font-size:12px;">保存はまだありません</div>`;
+    return;
+  }
+  container.innerHTML = metas.map(m => `
+    <div class="saved-item" onclick="openSaved('${esc(m.search_id)}')">
+      <span class="cnt">${m.hit_count}</span>
+      <div class="id">${esc(m.search_id)}</div>
+      <div class="meta">${esc(m.label || "")} · 基準${esc(m.date_now || "")}</div>
+      <div class="meta">${esc((m.created_at || "").replace("T", " "))}</div>
+    </div>`).join("");
+}
+
+async function openSaved(id) {
+  try {
+    const res = await fetch("/api/strategy_show?id=" + encodeURIComponent(id));
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    const key = data.meta.kind === "overlap" ? "st_overlap" : "st_" + data.meta.strategy;
+    autoLoaded.add(key);   // 先にマークして switchTab→autoLoadTab の再入を防ぐ
+    switchTab(key);
+    if (data.meta.kind === "overlap") renderOverlap($("tab-st_overlap"), data);
+    else renderStrategy($("tab-" + key), data);
+  } catch (e) {
+    alert("再表示に失敗: " + e.message);
+  }
+}
+
+buildStrategyPanels();
+buildOverlapPanel();
+refreshSaved();
+loadSaved();
+</script>
+</body>
+</html>
